@@ -1,0 +1,43 @@
+# Global ignores
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.bak
+*.swp
+
+# VS Code / IDE
+.vscode/
+.idea/
+*.iml
+
+# Node/React
+node_modules/
+.pnpm-store/
+.car-rental-system-frontend-master/.env*
+car-rental-system-frontend-master/build/
+car-rental-system-frontend-master/.parcel-cache/
+
+# Java/Maven
+car-rental-system-backend-master/target/
+.car-rental-system-backend-master/.mvn/
+.mvn/
+
+# Docker
+**/.dockerignore
+.docker/
+
+# OS / misc
+.env
+.env.*
+!.env.example
+**/.DS_Store
+**/Thumbs.db
+
+# Coverage/Reports
+coverage/
+reports/
+
+# Logs
+**/logs/
+**/*.log

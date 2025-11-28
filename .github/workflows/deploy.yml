@@ -1,0 +1,73 @@
+name: Deploy (Kubernetes via GHCR)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (default: latest)"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: read
+
+env:
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+  K8S_NAMESPACE: carrental
+
+jobs:
+  deploy:
+    name: Deploy to Kubernetes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${KUBE_CONFIG_DATA}" | base64 -d > $HOME/.kube/config
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl get ns $K8S_NAMESPACE || kubectl create ns $K8S_NAMESPACE
+
+      - name: Apply ConfigMap and PVCs
+        run: |
+          kubectl apply -n $K8S_NAMESPACE -f k8s/config-backend.yaml
+          kubectl apply -n $K8S_NAMESPACE -f k8s/mysql-pvc.yaml -f k8s/uploads-pvc.yaml
+
+      - name: Apply Secrets (from GitHub Secrets)
+        run: |
+          kubectl -n $K8S_NAMESPACE delete secret db-secret --ignore-not-found
+          kubectl -n $K8S_NAMESPACE create secret generic db-secret \
+            --from-literal=MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}" \
+            --from-literal=MYSQL_APP_PASSWORD="${MYSQL_APP_PASSWORD}"
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_APP_PASSWORD: ${{ secrets.MYSQL_APP_PASSWORD }}
+
+      - name: Deploy MySQL, Backend, Frontend
+        run: |
+          kubectl apply -n $K8S_NAMESPACE -f k8s/mysql-deployment.yaml
+          kubectl apply -n $K8S_NAMESPACE -f k8s/backend-deployment.yaml
+          kubectl apply -n $K8S_NAMESPACE -f k8s/frontend-deployment.yaml
+
+      - name: Set images to selected tag
+        run: |
+          BACKEND_IMAGE_TAGGED="${BACKEND_IMAGE}:${{ inputs.image_tag }}"
+          FRONTEND_IMAGE_TAGGED="${FRONTEND_IMAGE}:${{ inputs.image_tag }}"
+          kubectl -n $K8S_NAMESPACE set image deploy/backend backend=$BACKEND_IMAGE_TAGGED
+          kubectl -n $K8S_NAMESPACE set image deploy/frontend frontend=$FRONTEND_IMAGE_TAGGED
+
+      - name: Apply Ingress
+        run: |
+          kubectl apply -n $K8S_NAMESPACE -f k8s/ingress.yaml

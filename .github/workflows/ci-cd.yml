@@ -1,0 +1,107 @@
+name: CI-CD (Build Docker, Push to GHCR, Deploy to K8s)
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+  K8S_NAMESPACE: carrental
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./car-rental-system-backend-master
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+
+      - name: Build frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./car-rental-system-frontend-master
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Write kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${KUBE_CONFIG_DATA}" | base64 -d > ~/.kube/config
+        env:
+          KUBE_CONFIG_DATA: ${{ secrets.KUBE_CONFIG_DATA }}
+
+      - name: Create namespace
+        run: kubectl get ns $K8S_NAMESPACE || kubectl create ns $K8S_NAMESPACE
+
+      - name: Apply ConfigMap & PVCs
+        run: |
+          kubectl apply -n $K8S_NAMESPACE -f k8s/config-backend.yaml
+          kubectl apply -n $K8S_NAMESPACE -f k8s/mysql-pvc.yaml
+          kubectl apply -n $K8S_NAMESPACE -f k8s/uploads-pvc.yaml
+
+      - name: Apply Secrets
+        run: |
+          kubectl -n $K8S_NAMESPACE delete secret db-secret --ignore-not-found
+          kubectl -n $K8S_NAMESPACE create secret generic db-secret \
+            --from-literal=MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD}" \
+            --from-literal=MYSQL_APP_PASSWORD="${MYSQL_APP_PASSWORD}"
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.MYSQL_ROOT_PASSWORD }}
+          MYSQL_APP_PASSWORD: ${{ secrets.MYSQL_APP_PASSWORD }}
+
+      - name: Deploy manifests
+        run: |
+          kubectl apply -n $K8S_NAMESPACE -f k8s/mysql-deployment.yaml
+          kubectl apply -n $K8S_NAMESPACE -f k8s/backend-deployment.yaml
+          kubectl apply -n $K8S_NAMESPACE -f k8s/frontend-deployment.yaml
+
+      - name: Update images to SHA
+        run: |
+<<<<<<< HEAD
+          kubectl -n $K8S_NAMESPACE set image deploy/backend backend=${BACKEND_IMAGE}:${GITHUB_SHA}
+          kubectl -n $K8S_NAMESPACE set image deploy/frontend frontend=${FRONTEND_IMAGE}:${GITHUB_SHA}
+=======
+          kubectl -n $K8S_NAMESPACE set image deploy/car-rental-backend car-rental-backend=${BACKEND_IMAGE}:${GITHUB_SHA}
+          kubectl -n $K8S_NAMESPACE set image deploy/car-rental-frontend car-rental-frontend=${FRONTEND_IMAGE}:${GITHUB_SHA}
+>>>>>>> eb84db5494123665958b8326c1e95c7364ea70c8
+
+      - name: Apply ingress
+        run: kubectl apply -n $K8S_NAMESPACE -f k8s/ingress.yaml

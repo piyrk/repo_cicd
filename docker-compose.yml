@@ -1,0 +1,76 @@
+version: '3.9'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: car_rental_db
+    environment:
+      MYSQL_DATABASE: car_rental_system
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${SPRING_DATASOURCE_USERNAME}
+      MYSQL_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      # Using app user from .env (not root) for application access.
+    command: ["--default-authentication-plugin=mysql_native_password", "--max_connections=200"]
+    # Host port 3306 was busy; map container 3306 to host 3307 to avoid conflict.
+    ports:
+      - "3307:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./car-rental-system-backend-master
+      dockerfile: Dockerfile
+    container_name: car_rental_backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Spring Profile
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
+      # Database connection for container network
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/car_rental_system?createDatabaseIfNotExist=true&useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+      # Mail (optional; override as needed)
+      SPRING_MAIL_HOST: smtp.gmail.com
+      SPRING_MAIL_PORT: 587
+      SPRING_MAIL_USERNAME: your_email@gmail.com
+      SPRING_MAIL_PASSWORD: your_app_password
+      # File storage directories inside the container
+      VARIANT_DIR: /app/files/variant-image
+      LICENSE_DIR: /app/files/license-image
+      # Server port inside the container
+      SERVER_PORT: 8080
+    ports:
+      - "8080:8080"
+    volumes:
+      - uploads:/app/files
+
+  frontend:
+    build:
+      context: ./car-rental-system-frontend-master
+      dockerfile: Dockerfile
+      args:
+        # Bake the backend service URL into the frontend at build time
+        REACT_APP_API_BASE_URL: http://backend:8080
+    container_name: car_rental_frontend
+    depends_on:
+      - backend
+    environment:
+      # If you change frontend code to use env, you can pass the base URL
+      REACT_APP_API_BASE_URL: http://backend:8080
+    ports:
+      - "3000:80"
+
+env_file:
+  - .env
+
+volumes:
+  db_data:
+  uploads:

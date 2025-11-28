@@ -1,0 +1,10 @@
+target/
+.git/
+.gitignore
+.mvn/
+**/.DS_Store
+**/Thumbs.db
+**/*.log
+images/
+.idea/
+.vscode/
